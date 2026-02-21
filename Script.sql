@@ -48,15 +48,16 @@ select productname, unitprice from "Production"."Products" order by unitprice de
 --Задание 3. Написание запросов с вычисляемыми столбцами
 --1.	На основе таблицы Employees напишите запрос, возвращающий таблицу из 3 столбцов: Фамилия сотрудника, Имя сотрудника, e-mail адрес.
 --Столбец e-mail адрес должен быть сформирован в соответствие со следующим шаблоном: <имя>.<фамилия>@<названиеорганизации>.ru. Название организации придумайте сами! Полученные e-mail должны быть в нижнем регистре. Символы, недопустимые в адресе эл.почты, должны быть заменены нижним подчеркиванием.
-select  
+SELECT  
     lastname  AS "Фамилия сотрудника",
     firstname  AS "Имя сотрудника",
     LOWER(REPLACE(firstname , ' ', '_') || '.' || REPLACE(lastname , ' ', '_') || '@corp.ru') AS "e-mail адрес"
-from "HR"."Employees";
+FROM "HR"."Employees";
 
 --2.	На основании данных ТОЛЬКО таблицы Products (запрос только к одной таблице!) сформируйте таблицу из трех столбцов: Номер категории, Название продукта и Название категории. 
---Название категории должно выводиться в соответствии с ее номером:
---1 -  'Beverages'; 2 - 'Condiments'; 3 - 'Confections'; 4 - 'Dairy Products'; 5 - 'Grains/Cereals'; 6 - 'Meat/Poultry';  7 - 'Produce'; 8 - 'Seafood'. Для категорий, не попавших в данный список, необходимо вернуть значение  'Other'
+--	Название категории должно выводиться в соответствии с ее номером:
+-- 	1 -  'Beverages'; 2 - 'Condiments'; 3 - 'Confections'; 4 - 'Dairy Products'; 5 - 'Grains/Cereals'; 6 - 'Meat/Poultry';  
+-- 	7 - 'Produce'; 8 - 'Seafood'. Для категорий, не попавших в данный список, необходимо вернуть значение  'Other'
 SELECT  
     categoryid  AS "Номер категории", 
     productname  AS "Название продукта", 
@@ -74,15 +75,46 @@ SELECT
 FROM 
     "Production"."Products";
 
---3.	Напишите запрос к таблице Customers, возвращающий таблицу из 3 столбцов: contactname, LName и FName. Значение в столбцах LName и FName должны вычисляться на основе данных столбца contactname. (Можно использовать регулярные выражения!)
+--3.	Напишите запрос к таблице Customers, возвращающий таблицу из 3 столбцов: contactname, LName и FName. 
+--		Значение в столбцах LName и FName должны вычисляться на основе данных столбца contactname. (Можно использовать регулярные выражения!)
 SELECT 
     contactname,
     SUBSTRING(contactname FROM '^([^,]+)') AS "LName",
     SUBSTRING(contactname FROM ', (.+)$') AS "FName"
 FROM "Sales"."Customers";
 
---4.	Напишите запрос к таблице OrderDetails, возвращающий таблицу из 3 столбцов: unitprice, qty и LineTotal. Значение в столбце LineTotal – является расчетной величиной с учетом количества товара, цены и скидки.
--- 
+--4.	Напишите запрос к таблице OrderDetails, возвращающий таблицу из 3 столбцов: unitprice, qty и LineTotal. 
+--      Значение в столбце LineTotal – является расчетной величиной с учетом количества товара, цены и скидки.
+SELECT 
+    unitprice, 
+    qty, 
+    (unitprice * qty * (1 - discount)) AS "LineTotal"
+FROM "Sales"."OrderDetails";
+
+--	результат умножения может содержать много знаков после запятой (из-за специфики типа данных float или real). 
+--	Чтобы сумма выглядела аккуратно, ее можно округлить:
+SELECT 
+    unitprice, 
+    qty, 
+    ROUND(CAST(unitprice * qty * (1 - discount) AS NUMERIC), 2) AS "LineTotal"
+FROM "Sales"."OrderDetails";
+
 --Задание 4. Написание запросов с сортировкой
 --1.	Выведите 10 самых дорогих товаров.
+SELECT *
+FROM "Production"."Products"
+ORDER BY unitprice DESC
+LIMIT 10;
+
+--ORDER BY UnitPrice DESC: выстраивает все товары от самого дорогого к самому дешевому.
+--LIMIT 10 / TOP 10: «отрезает» только первые 10 строк из этого отсортированного списка. 
+
 --2.	Выведите из таблицы Orders строки с 51 по 100, упорядоченные по дате заказа
+--		Для того чтобы выбрать конкретный диапазон строк (с 51 по 100), необходимо 
+--		использовать механизм смещения (OFFSET) и лимита (LIMIT). Поскольку нужны строки
+--		с 51 по 100, это означает, что нужно пропустить первые 50 строк и взять следующие 50 строк:
+SELECT *
+FROM "Sales"."Orders"
+ORDER BY orderdate 
+LIMIT 50 OFFSET 50;
+
