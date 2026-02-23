@@ -38,6 +38,7 @@ SELECT array_replace(
 --	индекс последнего элемента всегда равен общему количеству элементов.
 SELECT (ARRAY['sql', 'sqlserver'] || ARRAY['database', 'plsql'])
 [cardinality(ARRAY['sql', 'sqlserver'] || ARRAY['database', 'plsql'])] AS last_element;
+
 /*------------------------------------------------------------------------------------------------*/
 WITH step_a AS (
     -- a. Объединяем два массива в один
