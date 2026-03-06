@@ -261,20 +261,27 @@ ORDER BY "Год";
 
 --	Самый чистый способ решить это — один раз привести unitprice к numeric внутри суммы:
 
-SELECT 
-    orderid AS "Номер заказа",
-    -- Считаем всё в numeric для точности, затем красиво выводим как money
-    SUM(unitprice::numeric * qty * (1 - discount))::numeric(12,2)::money AS "Общая стоимость"
-FROM "Sales"."OrderDetails"
-GROUP BY orderid
--- Сравниваем numeric с числом (теперь ошибки не будет)
-HAVING SUM(unitprice::numeric * qty * (1 - discount)) > 1000
-ORDER BY SUM(unitprice::numeric * qty * (1 - discount)) DESC;
+--SELECT 
+--    orderid AS "Номер заказа",
+--    -- Считаем всё в numeric для точности, затем красиво выводим как money
+--    SUM(unitprice::numeric * qty * (1 - discount))::numeric(12,2)::money AS "Общая стоимость"
+--FROM "Sales"."OrderDetails"
+--GROUP BY orderid
+---- Сравниваем numeric с числом (теперь ошибки не будет)
+--HAVING SUM(unitprice::numeric * qty * (1 - discount)) > 1000
+--ORDER BY SUM(unitprice::numeric * qty * (1 - discount)) DESC;
 
 --	В этом варианте:
 --	unitprice::numeric: Извлекаем числовое значение из денежного типа (убирает привязку к валюте).
 --	HAVING ... > 1000: Теперь мы сравниваем numeric с integer, что PostgreSQL делает без ошибок.
 
+SELECT 
+    orderid AS "Номер заказа",
+    SUM(unitprice * qty * (1 - discount)) AS "Общая стоимость"
+FROM "Sales"."OrderDetails"
+GROUP BY orderid
+HAVING SUM(unitprice * qty * (1 - discount)) > 1000::money
+ORDER BY "Общая стоимость" DESC;
 
 
 
