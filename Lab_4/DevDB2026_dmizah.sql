@@ -78,4 +78,45 @@ CREATE TABLE Staffing (
     CONSTRAINT chk_staff_dates CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
+CREATE OR REPLACE VIEW v_current_staffing AS
+SELECT 
+    e.last_name || ' ' || e.first_name || ' ' || COALESCE(e.middle_name, '') AS employee_fio,
+    d.name AS department_name,
+    p.name AS position_name,
+    s.employment_rate AS rate,
+    s.actual_salary AS salary,
+    -- Расчет соответствия оклада вилке должностей
+    CASE 
+        WHEN s.actual_salary < p.min_salary THEN 'Ниже минимума'
+        WHEN s.actual_salary > p.max_salary THEN 'Выше максимума'
+        ELSE 'В норме'
+    END AS salary_status,
+    s.start_date AS assignment_date,
+    o.order_number AS order_ref
+FROM Staffing s
+JOIN Employees e ON s.employee_id = e.employee_id
+JOIN Departments d ON s.dept_id = d.dept_id
+JOIN Positions p ON s.position_id = p.position_id
+JOIN Orders o ON s.appointment_order_id = o.order_id
+WHERE s.end_date IS NULL; -- Фильтр только по активным сотрудникам
+
+CREATE OR REPLACE VIEW v_org_structure AS
+SELECT 
+    d.name AS department,
+    COALESCE(p.name, '--- ГОЛОВНОЙ ОФИС ---') AS parent_department,
+    COALESCE(m.last_name || ' ' || m.first_name, 'ВАКАНСИЯ') AS manager_fio,
+    d.open_date,
+    -- Подсчет численности через подзапрос
+    (SELECT COUNT(DISTINCT st.employee_id) 
+     from Staffing st 
+     WHERE st.dept_id = d.dept_id AND st.end_date IS NULL) AS total_employees
+FROM Departments d
+LEFT JOIN Departments p ON d.parent_id = p.dept_id
+LEFT JOIN Employees m ON d.manager_id = m.employee_id
+WHERE d.close_date IS NULL; -- Показываем только действующие отделы
+
+SELECT * FROM v_current_staffing;
+SELECT * FROM v_org_structure;
+
+
 
