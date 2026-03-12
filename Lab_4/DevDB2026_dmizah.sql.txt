@@ -78,4 +78,71 @@ CREATE TABLE Staffing (
     CONSTRAINT chk_staff_dates CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
+Создайте БД с именем DevDB2026_<ваша учетка>
+Реализуйте таблицы для хранения требуемых данных.
+Определите в таблицах все необходимые ограничения целостности:
+Первичные ключи и альтернативные ключи
+Внешние ключи
+Ограничения CHECK и DEFAULT
+Средствами графической оболочки (например DBeaver) создайте схему вашей БД, отражающую все таблицы и связи между ними (по желанию).
+Реализуйте 2 представления, которые позволят получать из вашей БД основную информацию, соответствующую предметной области.
+Например: Список пассажиров на предстоящие поездки. Представление должно возвращать пункт отправления, пункт назначения, модель и регистрационный номер транспортного средства, ФИО водителя, ФИО пассажира, № места пассажира.
+В качестве ответа на данное задание приложите скрипт-файл, содержащий все операторы, необходимые для создания указанных объектов
+
+Для полноценного анализа кадров лучше всего создать два представления: одно для текущего штата (кто работает прямо сейчас), а второе — для структуры предприятия (иерархия отделов с их руководством).
+Вот SQL-запросы для их создания:
+1. Представление «Текущий кадровый состав» (v_active_staff)
+Это основное рабочее окно. Оно собирает данные из 4 таблиц, показывая актуальный список сотрудников, их должности, отделы, ставки и проверку оклада на соответствие «вилке».
+
+CREATE VIEW v_active_staff AS
+SELECT
+    e.last_name || ' ' || e.first_name || ' ' || COALESCE(e.middle_name, '') AS employee_full_name,
+    d.name AS department_name,
+    p.name AS position_name,
+    s.employment_rate AS rate,
+    s.actual_salary AS salary,
+    -- Проверка: вписывается ли оклад в вилку (текстовый статус)
+    CASE
+        WHEN s.actual_salary < p.min_salary THEN 'Ниже минимума'
+        WHEN s.actual_salary > p.max_salary THEN 'Выше максимума'
+        ELSE 'В норме'
+    END AS salary_status,
+    s.start_date AS appointed_at,
+    o.order_number AS appointment_order
+FROM Staffing s
+JOIN Employees e ON s.employee_id = e.employee_id
+JOIN Departments d ON s.dept_id = d.dept_id
+JOIN Positions p ON s.position_id = p.position_id
+JOIN Orders o ON s.appointment_order_id = o.order_id
+WHERE s.end_date IS NULL; -- Только те, кто работает сейчас
+
+
+2. Представление «Структура и руководство» (v_departments_info)
+Это представление позволяет увидеть дерево организации: название отдела, кому он подчиняется и кто в нём главный.
+
+CREATE VIEW v_departments_info AS
+SELECT
+    d.name AS department_name,
+    parent.name AS parent_department,
+    -- ФИО начальника из таблицы сотрудников
+    m.last_name || ' ' || m.first_name AS manager_name,
+    d.open_date,
+    -- Считаем количество активных сотрудников в этом отделе
+    (SELECT COUNT(*) FROM Staffing s WHERE s.dept_id = d.dept_id AND s.end_date IS NULL) AS staff_count
+FROM Departments d
+LEFT JOIN Departments parent ON d.parent_id = parent.dept_id
+LEFT JOIN Employees m ON d.manager_id = m.employee_id
+WHERE d.close_date IS NULL; -- Только действующие подразделения
+
+
+Что дают эти представления:
+Простота: Вам не нужно каждый раз писать сложные JOIN, достаточно вызвать SELECT * FROM v_active_staff.
+Безопасность: Вы можете дать пользователю доступ только к представлениям, скрыв персональные данные (адрес, телефон) из основной таблицы Employees.
+Аналитика: Второе представление сразу показывает «пустые» отделы, где нет сотрудников или не назначен начальник.
+Желаете добавить третье представление для истории перемещений конкретного сотрудника (его карьерный путь в компании)?
+
+
+
+
+
 
