@@ -30,11 +30,11 @@ CREATE TABLE Employees (
     hire_order_id INTEGER NOT NULL REFERENCES Orders(order_id),
     fire_date DATE,
     fire_order_id INTEGER REFERENCES Orders(order_id),
-    -- Валидация: возраст при приеме >= 14 лет (учитывает високосные годы)
+    -- Валидация: проверка возраста при приеме на работу >= 14 лет (INTERVAL '... years'- учитывает високосные годы)
     CONSTRAINT chk_emp_age CHECK (hire_date >= (birth_date + INTERVAL '14 years')),
     -- Валидация: логика дат
     CONSTRAINT chk_emp_dates CHECK (fire_date IS NULL OR fire_date >= hire_date),
-    -- Валидация: наличие приказа при увольнении
+    -- Валидация: проверка наличия приказа при увольнении
     CONSTRAINT chk_fire_order_req CHECK (
         (fire_date IS NULL AND fire_order_id IS NULL) OR 
         (fire_date IS NOT NULL AND fire_order_id IS NOT NULL)
@@ -107,10 +107,10 @@ INSERT INTO Staffing (staffing_id, employee_id, dept_id, position_id, employment
 (502, 2, 20, 2, 0.5, 45000, '2023-01-15', 101);
 
 
--- Формируем детализированный отчет по всем действующим сотрудникам на текущий момент
+-- Формируем детализированный отчет по всем действующим сотрудникам на текущий момент:
 CREATE OR REPLACE VIEW current_staffing AS
 select
-	-- Собираем полное ФИО. Благодаря COALESCE(e.middle_name, ''), если у сотрудника нет отчества, в строке не появится NULL (пустота),
+	-- Собираем полное ФИО. Благодаря COALESCE(e.middle_name, ''), если у сотрудника нет отчества, в строке не появится NULL.
     e.last_name || ' ' || e.first_name || ' ' || COALESCE(e.middle_name, '') AS employee_fio,
     d.name AS department_name,
     p.name AS position_name,
@@ -126,7 +126,7 @@ select
     s.start_date AS assignment_date,
     o.order_number AS order_ref
     -- Объединяем пять таблиц (Staffing, Employees, Departments, Positions, Orders), 
-    -- чтобы собрать в одном месте данные о человеке, его отделе, должности, ставке и приказе о назначении.
+    -- чтобы собрать в одном месте данные о человеке, его отделе, должности, ставке и приказе о назначении:
 FROM Staffing s
 JOIN Employees e ON s.employee_id = e.employee_id
 JOIN Departments d ON s.dept_id = d.dept_id
@@ -134,7 +134,7 @@ JOIN Positions p ON s.position_id = p.position_id
 JOIN Orders o ON s.appointment_order_id = o.order_id
 WHERE s.end_date IS NULL; -- Фильтр только по активным сотрудникам (только актуальный штат)
 
- -- Показывает дерево отделов, руководителей и актуальную численность штата.
+ -- Показывает дерево отделов, руководителей и актуальную численность штата:
 CREATE OR REPLACE VIEW org_structure AS
 SELECT 
     d.name AS department,
@@ -150,10 +150,10 @@ SELECT
      -- фильтр «активных» сотрудников. У тех, кто уже уволился, дата окончания работы (end_date) заполнена, поэтому запрос их игнорирует.
      WHERE st.dept_id = d.dept_id AND st.end_date IS NULL) AS total_employees      
 FROM Departments d
--- Использую LEFT JOIN, чтобы отделы без «родителя» (самые главные) не исчезли из отчета.
+-- Использую LEFT JOIN, чтобы отделы без «родителя» (самые главные) не исчезли из отчета:
 LEFT JOIN Departments p ON d.parent_id = p.dept_id
 LEFT JOIN Employees m ON d.manager_id = m.employee_id
--- Показываем только действующие отделы
+-- Показываем только действующие отделы:
 WHERE d.close_date IS NULL; 
 
 SELECT * FROM current_staffing;
