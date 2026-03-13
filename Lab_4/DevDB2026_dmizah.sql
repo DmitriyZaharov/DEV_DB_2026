@@ -77,15 +77,47 @@ CREATE TABLE Staffing (
     -- Валидация: проверка гарантирует, что время в кадровой истории течет только вперед  
     CONSTRAINT chk_staff_dates CHECK (end_date IS NULL OR end_date >= start_date)
 );
+ 
+-- Вставляем в таблицы БД по 2 записи:
+-- соблюдаем последовательность из-за внешних ключей (сначала справочники и приказы, затем сотрудники и подразделения).
 
-CREATE OR REPLACE VIEW v_current_staffing AS
-SELECT 
+-- 1. Должности
+INSERT INTO Positions (position_id, name, min_salary, max_salary) VALUES
+(1, 'Программист', 100000, 250000),
+(2, 'HR-менеджер', 60000, 120000);
+
+-- 2. Приказы (на прием, открытие отдела и назначение)
+INSERT INTO Orders (order_id, order_number, order_date, signer_name) VALUES
+(101, 'П-001', '2023-01-10', 'Иванов И.И.'),
+(102, 'О-001', '2023-01-11', 'Иванов И.И.');
+
+-- 3. Сотрудники (возраст > 14 лет)
+INSERT INTO Employees (employee_id, last_name, first_name, birth_date, reg_address, email, hire_date, hire_order_id) VALUES
+(1, 'Петров', 'Алексей', '1990-05-15', 'г. Москва, ул. Ленина, 1', 'petrov@work.ru', '2023-01-15', 101),
+(2, 'Сидорова', 'Анна', '1995-08-20', 'г. Москва, ул. Мира, 10', 'sidorova@work.ru', '2023-01-15', 101);
+
+-- 4. Подразделения (manager_id ссылается на созданных сотрудников)
+INSERT INTO Departments (dept_id, name, manager_id, open_date, open_order_id) VALUES
+(10, 'IT-департамент', 1, '2023-01-12', 102),
+(20, 'Отдел кадров', 2, '2023-01-12', 102);
+
+-- 5. Штатная расстановка
+INSERT INTO Staffing (staffing_id, employee_id, dept_id, position_id, employment_rate, actual_salary, start_date, appointment_order_id) VALUES
+(501, 1, 10, 1, 1.0, 150000, '2023-01-15', 101),
+(502, 2, 20, 2, 0.5, 45000, '2023-01-15', 101);
+
+
+-- Формируем детализированный отчет по всем действующим сотрудникам на текущий момент
+CREATE OR REPLACE VIEW current_staffing AS
+select
+	-- Собираем полное ФИО. Благодаря COALESCE(e.middle_name, ''), если у сотрудника нет отчества, в строке не появится NULL (пустота),
     e.last_name || ' ' || e.first_name || ' ' || COALESCE(e.middle_name, '') AS employee_fio,
     d.name AS department_name,
     p.name AS position_name,
     s.employment_rate AS rate,
     s.actual_salary AS salary,
-    -- Расчет соответствия оклада вилке должностей
+    -- Автоматический аудит зарплат. С помощью оператора CASE система сравнивает реальный оклад (actual_salary) 
+    -- с разрешенной «вилкой» для этой должности (min_salary и max_salary) и помечает отклонения.
     CASE 
         WHEN s.actual_salary < p.min_salary THEN 'Ниже минимума'
         WHEN s.actual_salary > p.max_salary THEN 'Выше максимума'
@@ -93,30 +125,39 @@ SELECT
     END AS salary_status,
     s.start_date AS assignment_date,
     o.order_number AS order_ref
+    -- Объединяем пять таблиц (Staffing, Employees, Departments, Positions, Orders), 
+    -- чтобы собрать в одном месте данные о человеке, его отделе, должности, ставке и приказе о назначении.
 FROM Staffing s
 JOIN Employees e ON s.employee_id = e.employee_id
 JOIN Departments d ON s.dept_id = d.dept_id
 JOIN Positions p ON s.position_id = p.position_id
 JOIN Orders o ON s.appointment_order_id = o.order_id
-WHERE s.end_date IS NULL; -- Фильтр только по активным сотрудникам
+WHERE s.end_date IS NULL; -- Фильтр только по активным сотрудникам (только актуальный штат)
 
-CREATE OR REPLACE VIEW v_org_structure AS
+ -- Показывает дерево отделов, руководителей и актуальную численность штата.
+CREATE OR REPLACE VIEW org_structure AS
 SELECT 
     d.name AS department,
     COALESCE(p.name, '--- ГОЛОВНОЙ ОФИС ---') AS parent_department,
+    -- Склеивает фамилию и имя менеджера через пробел.
+	-- Если в базе не указан руководитель отдела, вместо его имени будет написано «ВАКАНСИЯ».
     COALESCE(m.last_name || ' ' || m.first_name, 'ВАКАНСИЯ') AS manager_fio,
     d.open_date,
     -- Подсчет численности через подзапрос
-    (SELECT COUNT(DISTINCT st.employee_id) 
+    (SELECT COUNT(DISTINCT st.employee_id) -- считает количество уникальных ID сотрудников.
      from Staffing st 
-     WHERE st.dept_id = d.dept_id AND st.end_date IS NULL) AS total_employees
+     -- условие связи: считаются сотрудники только того отдела, который обрабатывается в основной части запроса в данный момент
+     -- фильтр «активных» сотрудников. У тех, кто уже уволился, дата окончания работы (end_date) заполнена, поэтому запрос их игнорирует.
+     WHERE st.dept_id = d.dept_id AND st.end_date IS NULL) AS total_employees      
 FROM Departments d
+-- Использую LEFT JOIN, чтобы отделы без «родителя» (самые главные) не исчезли из отчета.
 LEFT JOIN Departments p ON d.parent_id = p.dept_id
 LEFT JOIN Employees m ON d.manager_id = m.employee_id
-WHERE d.close_date IS NULL; -- Показываем только действующие отделы
+-- Показываем только действующие отделы
+WHERE d.close_date IS NULL; 
 
-SELECT * FROM v_current_staffing;
-SELECT * FROM v_org_structure;
+SELECT * FROM current_staffing;
+SELECT * FROM org_structure;
 
 
 
