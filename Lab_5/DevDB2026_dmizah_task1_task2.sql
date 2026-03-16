@@ -266,3 +266,132 @@ END $$;
 --чтобы не возникло ошибок Foreign Key Violation.
 --Безопасность: Приказы удаляются только в том случае, если на них нет активных ссылок. Если приказ от 2010 года до 
 --сих пор является основанием для приема работающего сотрудника, он останется в базе.
+
+--Задание 2. Транзакции
+--    1. Создайте в вашей БД следующую таблицу и добавьте в нее записи:
+--Создание таблицы
+   CREATE TABLE public."Goods" (
+      "ProductId" serial NOT NULL,
+      "ProductName" VARCHAR(100) NOT NULL,
+      "Price" MONEY NULL
+   );
+
+--Добавление данных в таблицу
+   INSERT INTO public."Goods"("ProductName", "Price")
+      VALUES ('Велосипед', 7550),
+             ('Перчатки', 230),
+             ('Насос', 150);
+
+-- Создание таблицы Goods в схеме public
+--CREATE TABLE public."Goods" (
+--   "ProductId" SERIAL PRIMARY KEY,
+--   "ProductName" VARCHAR(100) NOT NULL,
+--   "Price" MONEY NULL
+--);
+--
+-- Добавление начальных записей
+--INSERT INTO public."Goods"("ProductName", "Price")
+--VALUES 
+--    ('Велосипед', 7550),
+--    ('Перчатки', 230),
+--    ('Насос', 150);
+--
+-- Проверка результата
+--SELECT * FROM public."Goods";
+
+SELECT * 
+FROM public."Goods" 
+WHERE "ProductName" IN ('Велосипед', 'Перчатки', 'Насос');
+
+SELECT * 
+FROM public."Goods" 
+WHERE ("ProductName" = 'Велосипед' AND "Price" = 7550::money)
+   OR ("ProductName" = 'Перчатки' AND "Price" = 230::money)
+   OR ("ProductName" = 'Насос' AND "Price" = 150::money);
+
+--    3. Используя явную транзакцию выполните изменение цены продуктов в соответствии со следующей таблицей и приведите скрипт:
+--ProductId
+--Новая цена (Price)
+--1
+--Увеличение на 30%
+--2
+--Увеличение на 13%
+--Для изменения цен в рамках явной транзакции используется блок BEGIN и COMMIT. Это гарантирует, что либо все изменения 
+--применятся успешно, либо (в случае ошибки) база данных вернется в исходное состояние.
+--Поскольку столбец Price имеет тип MONEY, при расчетах важно приведение типов. Вот скрипт:
+
+BEGIN; -- Начало транзакции
+
+-- Увеличение цены для ProductId = 1 на 30%
+UPDATE public."Goods"
+SET "Price" = "Price" * 1.3
+WHERE "ProductId" = 1;
+
+-- Увеличение цены для ProductId = 2 на 13%
+UPDATE public."Goods"
+SET "Price" = "Price" * 1.13
+WHERE "ProductId" = 2;
+
+COMMIT; -- Фиксация изменений
+
+-- Проверка результата
+SELECT * FROM public."Goods" WHERE "ProductId" IN (1, 2);
+
+--Обратите внимание: если во время выполнения что-то пойдет не так, вы можете заменить COMMIT на ROLLBACK, чтобы отменить правки.
+--Выполните запрос для проверки наличия в таблице данных записей.
+SELECT 
+    "ProductId", 
+    "ProductName", 
+    "Price" 
+FROM public."Goods" 
+WHERE "ProductId" IN (1, 2);
+
+SELECT 
+    "ProductId", 
+    "ProductName", 
+    "Price" AS "CurrentPrice",
+    CASE 
+        WHEN "ProductId" = 1 THEN 'Ожидалось: +30%'
+        WHEN "ProductId" = 2 THEN 'Ожидалось: +13%'
+    END AS "Status"
+FROM public."Goods"
+WHERE "ProductId" IN (1, 2);
+
+--    5. Используя явную транзакцию выполните изменение цены продуктов в соответствии со следующей таблицей и приведите скрипт:
+--ProductId
+--Новая цена (Price)
+--2
+--Увеличение на 30%
+--3
+--'250 рублей'
+
+BEGIN; -- Начало транзакции
+
+-- Увеличение цены для ProductId = 2 на 30%
+UPDATE public."Goods"
+SET "Price" = "Price" * 1.3
+WHERE "ProductId" = 2;
+
+-- Установка фиксированной цены для ProductId = 3
+UPDATE public."Goods"
+SET "Price" = 250::money
+WHERE "ProductId" = 3;
+
+COMMIT; -- Фиксация изменений
+
+-- Проверка результата
+SELECT * FROM public."Goods" WHERE "ProductId" IN (2, 3);
+
+--Выполните запрос для проверки наличия в таблице данных записей. Приведите скрипт.
+
+SELECT 
+    "ProductId", 
+    "ProductName", 
+    "Price" 
+FROM public."Goods" 
+ORDER BY "ProductId";
+
+SELECT * 
+FROM public."Goods" 
+WHERE "ProductId" IN (2, 3);
+
