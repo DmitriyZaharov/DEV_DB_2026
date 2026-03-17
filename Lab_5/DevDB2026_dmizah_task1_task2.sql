@@ -78,7 +78,7 @@ CREATE TABLE Staffing (
     CONSTRAINT chk_staff_dates CHECK (end_date IS NULL OR end_date >= start_date)
 );
  
--- Вставляем в таблицы БД по 2 записи:
+-- 1. Вставляем в таблицы БД по 2 записи:
 -- соблюдаем последовательность из-за внешних ключей (сначала справочники и приказы, затем сотрудники и подразделения).
 
 -- 1. Должности
@@ -107,60 +107,14 @@ INSERT INTO Staffing (staffing_id, employee_id, dept_id, position_id, employment
 (502, 2, 20, 2, 0.5, 45000, '2023-01-15', 101);
 
 
--- Формируем детализированный отчет по всем действующим сотрудникам на текущий момент:
-CREATE OR REPLACE VIEW current_staffing AS
-select
-	-- Собираем полное ФИО. Благодаря COALESCE(e.middle_name, ''), если у сотрудника нет отчества, в строке не появится NULL.
-    e.last_name || ' ' || e.first_name || ' ' || COALESCE(e.middle_name, '') AS employee_fio,
-    d.name AS department_name,
-    p.name AS position_name,
-    s.employment_rate AS rate,
-    s.actual_salary AS salary,
-    -- Автоматический аудит зарплат. С помощью оператора CASE система сравнивает реальный оклад (actual_salary) 
-    -- с разрешенной «вилкой» для этой должности (min_salary и max_salary) и помечает отклонения.
-    CASE 
-        WHEN s.actual_salary < p.min_salary THEN 'Ниже минимума'
-        WHEN s.actual_salary > p.max_salary THEN 'Выше максимума'
-        ELSE 'В норме'
-    END AS salary_status,
-    s.start_date AS assignment_date,
-    o.order_number AS order_ref
-    -- Объединяем пять таблиц (Staffing, Employees, Departments, Positions, Orders), 
-    -- чтобы собрать в одном месте данные о человеке, его отделе, должности, ставке и приказе о назначении:
-FROM Staffing s
-JOIN Employees e ON s.employee_id = e.employee_id
-JOIN Departments d ON s.dept_id = d.dept_id
-JOIN Positions p ON s.position_id = p.position_id
-JOIN Orders o ON s.appointment_order_id = o.order_id
-WHERE s.end_date IS NULL; -- Фильтр только по активным сотрудникам (только актуальный штат)
+-- 2. Выполните модификацию записей в таблицах вашей БД, в соответствии с бизнес-требованиями 
+--  выбранной предметной области. Приведите скрипт.
 
- -- Показывает дерево отделов, руководителей и актуальную численность штата:
-CREATE OR REPLACE VIEW org_structure AS
-SELECT 
-    d.name AS department,
-    COALESCE(p.name, '--- ГОЛОВНОЙ ОФИС ---') AS parent_department,
-    -- Склеивает фамилию и имя менеджера через пробел.
-	-- Если в базе не указан руководитель отдела, вместо его имени будет написано «ВАКАНСИЯ».
-    COALESCE(m.last_name || ' ' || m.first_name, 'ВАКАНСИЯ') AS manager_fio,
-    d.open_date,
-    -- Подсчет численности через подзапрос
-    (SELECT COUNT(DISTINCT st.employee_id) -- считает количество уникальных ID сотрудников.
-     from Staffing st 
-     -- условие связи: считаются сотрудники только того отдела, который обрабатывается в основной части запроса в данный момент
-     -- фильтр «активных» сотрудников. У тех, кто уже уволился, дата окончания работы (end_date) заполнена, поэтому запрос их игнорирует.
-     WHERE st.dept_id = d.dept_id AND st.end_date IS NULL) AS total_employees      
-FROM Departments d
--- Использую LEFT JOIN, чтобы отделы без «родителя» (самые главные) не исчезли из отчета:
-LEFT JOIN Departments p ON d.parent_id = p.dept_id
-LEFT JOIN Employees m ON d.manager_id = m.employee_id
--- Показываем только действующие отделы:
-WHERE d.close_date IS NULL; 
+-- Для выполнения модификации данных в рамках кадрового учета реализованы сценарии, 
+-- охватывающие несколько типичных бизнес-ситуации: оформление приказа, прием нового 
+-- сотрудника, ндексацию зарплат, перевод сотрудника 
+-- в другой отдел и закрытие подразделения с увольнением сотрудников.
 
-SELECT * FROM current_staffing;
-SELECT * FROM org_structure;
-
-
--- Выполните модификацию записей в таблицах вашей БД, в соответствии с бизнес-требованиями выбранной предметной области. Приведите скрипт.
 
 -- 1. ОФОРМЛЕНИЕ ПРИКАЗОВ (Основания для действий)
 INSERT INTO Orders (order_id, order_number, order_date, signer_name) VALUES 
@@ -214,90 +168,97 @@ SET end_date = '2025-03-15',
     release_order_id = 103
 WHERE employee_id = 50 AND end_date IS NULL;
 
---Напишите скрипт, для удаления неактуальных записей из таблиц вашей БД.
+-- 5. БИЗНЕС-КЕЙС: Индексация зарплат на 10% для конкретной должности
+-- Требование: Повысить 'min_salary' и 'max_salary' в справочнике 
+-- и обновить текущие оклады сотрудников на этой должности.
 
---Для удаления неактуальных записей в кадровой БД важно соблюдать иерархию связей (Foreign Keys), 
---чтобы не нарушить целостность данных. Неактуальными обычно считаются записи об уволенных 
---сотрудниках, закрытых подразделениях и приказах десятилетней давности.
+-- Обновляем вилку в справочнике (например, для системных администраторов)
+UPDATE Positions 
+SET min_salary = min_salary * 1.1, 
+    max_salary = max_salary * 1.1
+WHERE name = 'Системный администратор';
 
--- Определяем дату, ранее которой данные считаются архивными
-DO $$ 
-DECLARE 
-    archive_date DATE := CURRENT_DATE - INTERVAL '5 years';
-BEGIN
+-- Обновляем фактические зарплаты в штатной расстановке для активных записей
+UPDATE Staffing
+SET actual_salary = actual_salary * 1.1
+WHERE position_id = (SELECT position_id FROM Positions WHERE name = 'Системный администратор')
+  AND end_date IS NULL;
 
-    -- 1. Удаляем историю перемещений (Staffing) для уволенных сотрудников
-    -- Удаляем только те записи, которые закончились раньше архивной даты
-    DELETE FROM Staffing
-    WHERE end_date < archive_date;
+-- 6. БИЗНЕС-КЕЙС: Кадровое перемещение (Перевод в другой отдел)
+-- Требование: Закрыть старую запись в Staffing и открыть новую.
 
-    -- 2. Удаляем закрытые подразделения
-    -- Предварительно зануляем ссылки в Staffing (если они там остались) или в иерархии Departments
-    UPDATE Departments SET parent_id = NULL WHERE close_date < archive_date;
-    
-    DELETE FROM Departments
-    WHERE close_date < archive_date;
+-- Допустим, сотрудник с ID 5 переводится из отдела ID 1 в отдел ID 2 по приказу ID 105
+BEGIN;
+    -- Закрываем текущую позицию (дата окончания — вчера)
+    UPDATE Staffing
+    SET end_date = CURRENT_DATE - INTERVAL '1 day',
+        release_order_id = 105
+    WHERE employee_id = 5 AND end_date IS NULL;
 
-    -- 3. Удаляем уволенных сотрудников
-    -- Удалятся только те, у кого fire_date < archive_date и на кого больше нет ссылок в Staffing
-    -- (Благодаря п.1 ссылки в Staffing уже удалены)
-    DELETE FROM Employees
-    WHERE fire_date < archive_date;
+    -- Создаем новую запись в штатной расстановке
+    INSERT INTO Staffing (staffing_id, employee_id, dept_id, position_id, employment_rate, actual_salary, start_date, appointment_order_id)
+    VALUES (nextval('staffing_seq'), 5, 2, 3, 1.0, 85000, CURRENT_DATE, 105);
+COMMIT;
 
-    -- 4. Удаляем старые приказы
-    -- Удаляем только те приказы, на которые больше никто не ссылается
-    DELETE FROM Orders
-    WHERE order_date < archive_date
-      AND order_id NOT IN (SELECT hire_order_id FROM Employees)
-      AND order_id NOT IN (SELECT COALESCE(fire_order_id, 0) FROM Employees)
-      AND order_id NOT IN (SELECT open_order_id FROM Departments)
-      AND order_id NOT IN (SELECT COALESCE(close_order_id, 0) FROM Departments)
-      AND order_id NOT IN (SELECT appointment_order_id FROM Staffing)
-      AND order_id NOT IN (SELECT COALESCE(release_order_id, 0) FROM Staffing);
+--	Напишите скрипт, для удаления неактуальных записей из таблиц вашей БД.
+--	Сначала удаляем зависимости, потом основные записи.
+--	Скрипт сначала удаляет «дочерние» записи (Staffing), а затем «родительские» (Employees, Orders),
+--	чтобы не возникло ошибок Foreign Key Violation.
 
-    -- 5. Удаляем должности, которые не используются
-    -- (Например, старые позиции, на которых никто не числится)
-    DELETE FROM Positions
-    WHERE position_id NOT IN (SELECT position_id FROM Staffing);
+-- 1. Удаление записей из штатной расстановки (Staffing)
+-- Удаляем записи по сотрудникам, которые уволены более 10 лет назад
 
-END $$;
+DELETE FROM Staffing
+WHERE employee_id IN (
+    SELECT employee_id 
+    FROM Employees 
+    WHERE fire_date < CURRENT_DATE - INTERVAL '10 years'
+);
 
---Логика удаления: Скрипт сначала удаляет «дочерние» записи (Staffing), а затем «родительские» (Employees, Orders),
---чтобы не возникло ошибок Foreign Key Violation.
---Безопасность: Приказы удаляются только в том случае, если на них нет активных ссылок. Если приказ от 2010 года до 
---сих пор является основанием для приема работающего сотрудника, он останется в базе.
+-- 2. Удаление старых подразделений
+-- Удаляем подразделения, которые закрыты более 5 лет назад и не имеют сотрудников
+DELETE FROM Departments
+WHERE close_date < CURRENT_DATE - INTERVAL '5 years'
+  AND dept_id NOT IN (SELECT DISTINCT dept_id FROM Staffing);
+
+-- 3. Удаление уволенных сотрудников
+-- Удаляем данные сотрудников, чьи записи в Staffing уже удалены выше
+DELETE FROM Employees
+WHERE fire_date < CURRENT_DATE - INTERVAL '10 years'
+  AND employee_id NOT IN (SELECT employee_id FROM Staffing);
+
+-- 4. Удаление неиспользуемых приказов
+-- Удаляем приказы, на которые больше никто не ссылается (ни сотрудники, ни отделы, ни расстановка)
+DELETE FROM Orders
+WHERE order_id NOT IN (SELECT hire_order_id FROM Employees WHERE hire_order_id IS NOT NULL)
+  AND order_id NOT IN (SELECT fire_order_id FROM Employees WHERE fire_order_id IS NOT NULL)
+  AND order_id NOT IN (SELECT open_order_id FROM Departments)
+  AND order_id NOT IN (SELECT close_order_id FROM Departments WHERE close_order_id IS NOT NULL)
+  AND order_id NOT IN (SELECT appointment_order_id FROM Staffing)
+  AND order_id NOT IN (SELECT release_order_id FROM Staffing WHERE release_order_id IS NOT NULL);
+
+-- 5. Очистка справочника должностей
+-- Удаляем должности, которые не закреплены ни за одним подразделением или сотрудником
+DELETE FROM Positions
+WHERE position_id NOT IN (SELECT DISTINCT position_id FROM Staffing);
+
 
 --Задание 2. Транзакции
---    1. Создайте в вашей БД следующую таблицу и добавьте в нее записи:
---Создание таблицы
-   CREATE TABLE public."Goods" (
-      "ProductId" serial NOT NULL,
-      "ProductName" VARCHAR(100) NOT NULL,
-      "Price" MONEY NULL
-   );
+--	1. Создайте в вашей БД следующую таблицу и добавьте в нее записи:
+--	Создание таблицы
+CREATE TABLE public."Goods" (
+   "ProductId" serial NOT NULL,
+   "ProductName" VARCHAR(100) NOT NULL,
+   "Price" MONEY NULL
+);
 
---Добавление данных в таблицу
-   INSERT INTO public."Goods"("ProductName", "Price")
-      VALUES ('Велосипед', 7550),
-             ('Перчатки', 230),
-             ('Насос', 150);
+--	Добавление данных в таблицу
+INSERT INTO public."Goods"("ProductName", "Price")
+   VALUES ('Велосипед', 7550),
+          ('Перчатки', 230),
+          ('Насос', 150);
 
--- Создание таблицы Goods в схеме public
---CREATE TABLE public."Goods" (
---   "ProductId" SERIAL PRIMARY KEY,
---   "ProductName" VARCHAR(100) NOT NULL,
---   "Price" MONEY NULL
---);
---
--- Добавление начальных записей
---INSERT INTO public."Goods"("ProductName", "Price")
---VALUES 
---    ('Велосипед', 7550),
---    ('Перчатки', 230),
---    ('Насос', 150);
---
--- Проверка результата
---SELECT * FROM public."Goods";
+-- Проверка результата:
 
 SELECT * 
 FROM public."Goods" 
@@ -310,35 +271,29 @@ WHERE ("ProductName" = 'Велосипед' AND "Price" = 7550::money)
    OR ("ProductName" = 'Насос' AND "Price" = 150::money);
 
 --    3. Используя явную транзакцию выполните изменение цены продуктов в соответствии со следующей таблицей и приведите скрипт:
---ProductId
---Новая цена (Price)
---1
---Увеличение на 30%
---2
---Увеличение на 13%
---Для изменения цен в рамках явной транзакции используется блок BEGIN и COMMIT. Это гарантирует, что либо все изменения 
---применятся успешно, либо (в случае ошибки) база данных вернется в исходное состояние.
---Поскольку столбец Price имеет тип MONEY, при расчетах важно приведение типов. Вот скрипт:
+--	ProductId
+--	Новая цена (Price)
+--	1
+--	Увеличение на 30%
+--	2
+--	Увеличение на 13%
 
 BEGIN; -- Начало транзакции
+	-- Увеличение цены для ProductId = 1 на 30%
+	UPDATE public."Goods"
+	SET "Price" = "Price" * 1.3
+	WHERE "ProductId" = 1;
 
--- Увеличение цены для ProductId = 1 на 30%
-UPDATE public."Goods"
-SET "Price" = "Price" * 1.3
-WHERE "ProductId" = 1;
-
--- Увеличение цены для ProductId = 2 на 13%
-UPDATE public."Goods"
-SET "Price" = "Price" * 1.13
-WHERE "ProductId" = 2;
-
+	-- Увеличение цены для ProductId = 2 на 13%
+	UPDATE public."Goods"
+	SET "Price" = "Price" * 1.13
+	WHERE "ProductId" = 2;
 COMMIT; -- Фиксация изменений
 
 -- Проверка результата
 SELECT * FROM public."Goods" WHERE "ProductId" IN (1, 2);
 
---Обратите внимание: если во время выполнения что-то пойдет не так, вы можете заменить COMMIT на ROLLBACK, чтобы отменить правки.
---Выполните запрос для проверки наличия в таблице данных записей.
+--	Выполните запрос для проверки наличия в таблице данных записей:
 SELECT 
     "ProductId", 
     "ProductName", 
@@ -358,25 +313,21 @@ FROM public."Goods"
 WHERE "ProductId" IN (1, 2);
 
 --    5. Используя явную транзакцию выполните изменение цены продуктов в соответствии со следующей таблицей и приведите скрипт:
---ProductId
---Новая цена (Price)
---2
---Увеличение на 30%
---3
---'250 рублей'
+--	ProductId
+--	Новая цена (Price)
+--	2  - Увеличение на 30%
+--	3  - '250 рублей'
 
 BEGIN; -- Начало транзакции
+	-- Увеличение цены для ProductId = 2 на 30%
+	UPDATE public."Goods"
+	SET "Price" = "Price" * 1.3
+	WHERE "ProductId" = 2;
 
--- Увеличение цены для ProductId = 2 на 30%
-UPDATE public."Goods"
-SET "Price" = "Price" * 1.3
-WHERE "ProductId" = 2;
-
--- Установка фиксированной цены для ProductId = 3
-UPDATE public."Goods"
-SET "Price" = 250::money
-WHERE "ProductId" = 3;
-
+	-- Установка фиксированной цены для ProductId = 3
+	UPDATE public."Goods"
+	SET "Price" = 250::money
+	WHERE "ProductId" = 3;
 COMMIT; -- Фиксация изменений
 
 -- Проверка результата
@@ -394,4 +345,62 @@ ORDER BY "ProductId";
 SELECT * 
 FROM public."Goods" 
 WHERE "ProductId" IN (2, 3);
+
+--	Задание 3. Уровни изоляции транзакций
+--	Задача 1.
+
+-- a. Проверяем текущий уровень изоляции (по умолчанию обычно read committed)
+SELECT current_setting('transaction_isolation');
+
+-- b. Открываем явную транзакцию
+BEGIN;
+
+-- c. Добавляем новый товар
+INSERT INTO public."Goods" ("ProductName", "Price")
+VALUES ('Шлем', 1200);
+
+-- d. Фиксируем номер текущей транзакции (например, 755)
+SELECT txid_current();
+
+-- e. Транзакцию НЕ ЗАКРЫВАЕМ (оставляем висеть)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
